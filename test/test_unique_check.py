@@ -1,188 +1,315 @@
+"""Tests for UniqueCheck with pytest best practices."""
+
 import polars as pl
 import pytest
 
+from src.checks.constants import CheckConfigField, CheckConfigKey
 from src.checks.unique import UniqueCheck
 from src.models.result import CheckRule
 
 
-@pytest.fixture
-def test_df() -> pl.LazyFrame:
-    df = pl.LazyFrame(
-        {"col1": [1, 2, 3], "col2": [4, 5, 6], "col3": [7, 8, 7], "col4": [10, 10, 10]}
+class TestUniqueCheck:
+    """Test suite for UniqueCheck."""
+
+    @pytest.fixture
+    def sample_df(self):
+        """Sample DataFrame with various uniqueness patterns."""
+        return pl.LazyFrame(
+            {
+                "unique_int": [1, 2, 3],
+                "unique_str": ["a", "b", "c"],
+                "dup_int": [1, 2, 1],
+                "all_dup": [5, 5, 5],
+                "with_null": [1, None, None],
+            }
+        )
+
+    @staticmethod
+    def _assert_basic_check_result(result, expected_name: str):
+        """Helper to assert basic check result properties."""
+        assert result.check_rule == CheckRule.UNIQUE_CHECK
+        assert result.check_name == expected_name
+        assert result.detail.column in expected_name
+
+    @pytest.mark.parametrize(
+        "column,exclude_nulls,expected_pass",
+        [
+            ("unique_int", True, True),  # All unique values
+            ("unique_str", True, True),  # All unique strings
+            ("dup_int", True, False),  # Has duplicates
+            ("all_dup", True, False),  # All same value
+            ("with_null", True, True),  # Multiple NULLs but excluded
+            ("with_null", False, False),  # Multiple NULLs counted as duplicates
+        ],
     )
-    return df
+    def test_unique_various_columns(
+        self, sample_df, column, exclude_nulls, expected_pass
+    ):
+        """Test unique check on various columns with different null handling."""
+        check = UniqueCheck(
+            {
+                CheckConfigKey.UNIQUE_CHECK: {
+                    CheckConfigField.COLUMNS: [column],
+                    CheckConfigField.EXCLUDE_NULLS: exclude_nulls,
+                }
+            }
+        )
+        result = check.execute(sample_df)
 
+        assert len(result) == 1
+        assert result[0].is_passed == expected_pass
+        assert result[0].detail.exclude_nulls == exclude_nulls
+        self._assert_basic_check_result(result[0], f"unique_{column}")
 
-def test_unique_check_passed(test_df):
-    columns_to_check_unique: list[str] = ["col1", "col2"]
-    check = UniqueCheck({"unique_check": {"columns": columns_to_check_unique}})
-    result = check.execute(test_df)
+    def test_unique_multiple_columns(self, sample_df):
+        """Test checking multiple columns at once."""
+        check = UniqueCheck(
+            {
+                CheckConfigKey.UNIQUE_CHECK: {
+                    CheckConfigField.COLUMNS: ["unique_int", "dup_int", "all_dup"]
+                }
+            }
+        )
+        results = check.execute(sample_df)
 
-    assert len(result) == len(columns_to_check_unique)
-    assert all(r.is_passed for r in result)
-    assert result[0].check_rule == CheckRule.UNIQUE_CHECK
-    assert result[1].check_rule == CheckRule.UNIQUE_CHECK
-    assert result[0].check_name == "unique_col1"
-    assert result[1].check_name == "unique_col2"
-    assert result[0].is_passed
-    assert result[1].is_passed
-    assert result[0].detail.column == "col1"
-    assert result[0].detail.total_rows == 3
-    assert result[0].detail.duplicated_count == 0
-    assert result[0].detail.duplicated_samples is None
-    assert result[0].detail.exclude_nulls
+        assert len(results) == 3
+        assert results[0].is_passed is True  # unique_int: all unique
+        assert results[1].is_passed is False  # dup_int: has duplicates
+        assert results[2].is_passed is False  # all_dup: all duplicates
 
-
-def test_unique_check_failed(test_df):
-    columns_to_check_unique: list[str] = ["col3", "col4"]
-    check = UniqueCheck({"unique_check": {"columns": columns_to_check_unique}})
-    result = check.execute(test_df)
-
-    assert len(result) == len(columns_to_check_unique)
-    assert not all(r.is_passed for r in result)
-    assert result[0].check_rule == CheckRule.UNIQUE_CHECK
-    assert result[1].check_rule == CheckRule.UNIQUE_CHECK
-    assert result[0].check_name == "unique_col3"
-    assert result[1].check_name == "unique_col4"
-    assert not result[0].is_passed
-    assert not result[1].is_passed
-    assert result[0].detail.column == "col3"
-    assert result[0].detail.total_rows == 3
-    assert result[0].detail.duplicated_count == 2
-    assert result[0].detail.duplicated_samples == ["7"]
-    assert result[1].detail.duplicated_count == 3
-
-
-def test_unique_check_mix_result(test_df):
-    columns_to_check_unique: list[str] = ["col1", "col2", "col3", "col4"]
-    check = UniqueCheck({"unique_check": {"columns": columns_to_check_unique}})
-    result = check.execute(test_df)
-
-    assert len(result) == len(columns_to_check_unique)
-    assert not all(r.is_passed for r in result)
-    assert result[0].check_rule == CheckRule.UNIQUE_CHECK
-    assert result[1].check_rule == CheckRule.UNIQUE_CHECK
-    assert result[2].check_rule == CheckRule.UNIQUE_CHECK
-    assert result[3].check_rule == CheckRule.UNIQUE_CHECK
-    assert result[0].check_name == "unique_col1"
-    assert result[1].check_name == "unique_col2"
-    assert result[2].check_name == "unique_col3"
-    assert result[3].check_name == "unique_col4"
-    assert result[0].is_passed
-    assert result[1].is_passed
-    assert not result[2].is_passed
-    assert not result[3].is_passed
-
-
-def test_unique_check_empty_df():
-    df = pl.LazyFrame({"col1": []})
-    columns_to_check_unique: list[str] = ["col1"]
-    check = UniqueCheck({"unique_check": {"columns": columns_to_check_unique}})
-    result = check.execute(df)
-
-    assert len(result) == len(columns_to_check_unique)
-    assert all(r.is_passed for r in result)
-    assert result[0].check_rule == CheckRule.UNIQUE_CHECK
-    assert result[0].check_name == "unique_col1"
-    assert result[0].is_passed
-
-
-def test_unique_check_with_nulls_excluding_nulls():
-    df = pl.LazyFrame({"col1": [1, 2, None, None]})
-    columns_to_check_unique: list[str] = ["col1"]
-    check = UniqueCheck({"unique_check": {"columns": columns_to_check_unique}})
-    result = check.execute(df)
-
-    assert len(result) == len(columns_to_check_unique)
-    assert all(r.is_passed for r in result)
-    assert result[0].check_rule == CheckRule.UNIQUE_CHECK
-    assert result[0].check_name == "unique_col1"
-    assert result[0].is_passed
-
-    assert result[0].detail.null_count == 2
-    assert result[0].detail.total_rows == 2
-    assert result[0].detail.exclude_nulls
-    assert result[0].detail.duplicated_count == 0
-
-
-def test_unique_check_with_nulls_not_excluding_nulls():
-    df = pl.LazyFrame({"col1": [1, 2, None, None]})
-    columns_to_check_unique: list[str] = ["col1"]
-    check = UniqueCheck(
-        {"unique_check": {"columns": columns_to_check_unique, "exclude_nulls": False}}
+    @pytest.mark.parametrize(
+        "data,exclude_nulls,expected_pass,expected_dup_count",
+        [
+            ([1, 2, 3], True, True, 0),  # All unique
+            ([1, 2, 1], True, False, 2),  # Has duplicates
+            ([1, 1, 1], True, False, 3),  # All same
+            ([1, None, None], True, True, 0),  # NULLs excluded
+            ([1, None, None], False, False, 2),  # NULLs counted
+            ([None, None, None], True, True, 0),  # All NULL, excluded
+            ([None, None, None], False, False, 3),  # All NULL, counted
+            ([], True, True, 0),  # Empty
+        ],
     )
-    result = check.execute(df)
+    def test_uniqueness_patterns(
+        self, data, exclude_nulls, expected_pass, expected_dup_count
+    ):
+        """Test various uniqueness patterns with different null handling."""
+        df = pl.LazyFrame({"col": data})
+        check = UniqueCheck(
+            {
+                CheckConfigKey.UNIQUE_CHECK: {
+                    CheckConfigField.COLUMNS: ["col"],
+                    CheckConfigField.EXCLUDE_NULLS: exclude_nulls,
+                }
+            }
+        )
+        result = check.execute(df)[0]
 
-    assert len(result) == len(columns_to_check_unique)
-    assert not all(r.is_passed for r in result)
-    assert result[0].check_rule == CheckRule.UNIQUE_CHECK
-    assert result[0].check_name == "unique_col1"
-    assert not result[0].is_passed
-    assert result[0].detail.null_count == 0
-    assert result[0].detail.total_rows == 4
-    assert not result[0].detail.exclude_nulls
-    assert result[0].detail.duplicated_count == 2
+        assert result.is_passed == expected_pass
+        assert result.detail.duplicated_count == expected_dup_count
+        assert result.detail.exclude_nulls == exclude_nulls
 
+    def test_default_exclude_nulls_is_true(self):
+        """Test that exclude_nulls defaults to True."""
+        df = pl.LazyFrame({"col": [1, None, None]})
+        check = UniqueCheck(
+            {CheckConfigKey.UNIQUE_CHECK: {CheckConfigField.COLUMNS: ["col"]}}
+        )
+        result = check.execute(df)[0]
 
-def test_unique_check_all_nulls():
-    df = pl.LazyFrame({"col1": [None, None, None, None]})
-    columns_to_check_unique: list[str] = ["col1"]
+        assert result.is_passed is True  # NULLs excluded by default
+        assert result.detail.exclude_nulls is True
+        assert result.detail.null_count == 2
 
-    check1 = UniqueCheck({"unique_check": {"columns": columns_to_check_unique}})
-    result1 = check1.execute(df)
-
-    assert len(result1) == len(columns_to_check_unique)
-    assert all(r.is_passed for r in result1)
-    assert result1[0].check_rule == CheckRule.UNIQUE_CHECK
-    assert result1[0].check_name == "unique_col1"
-    assert result1[0].is_passed
-    assert result1[0].detail.null_count == 4
-    assert result1[0].detail.total_rows == 0
-    assert result1[0].detail.duplicated_count == 0
-
-    check2 = UniqueCheck(
-        {"unique_check": {"columns": columns_to_check_unique, "exclude_nulls": False}}
+    @pytest.mark.parametrize(
+        "config,expected_result_count",
+        [
+            ({}, 0),  # Empty config
+            ({CheckConfigKey.UNIQUE_CHECK: {}}, 0),  # Missing columns
+            (
+                {CheckConfigKey.UNIQUE_CHECK: {CheckConfigField.COLUMNS: []}},
+                0,
+            ),  # Empty columns list
+        ],
     )
-    result2 = check2.execute(df)
+    def test_invalid_configs(self, sample_df, config, expected_result_count):
+        """Test handling of invalid configurations."""
+        check = UniqueCheck(config)
+        result = check.execute(sample_df)
 
-    assert len(result2) == len(columns_to_check_unique)
-    assert not all(r.is_passed for r in result2)
-    assert result2[0].check_rule == CheckRule.UNIQUE_CHECK
-    assert result2[0].check_name == "unique_col1"
-    assert not result2[0].is_passed
-    assert result2[0].detail.total_rows == 4
-    assert result2[0].detail.duplicated_count == 4
+        assert len(result) == expected_result_count
+
+    def test_nonexistent_column(self, sample_df):
+        """Test checking a column that doesn't exist."""
+        check = UniqueCheck(
+            {CheckConfigKey.UNIQUE_CHECK: {CheckConfigField.COLUMNS: ["nonexistent"]}}
+        )
+        result = check.execute(sample_df)
+
+        assert result == []
+
+    def test_detail_structure_with_duplicates(self):
+        """Test CheckDetail structure when duplicates exist."""
+        df = pl.LazyFrame({"col": [1, 2, 2, 3, 3, 3]})
+        check = UniqueCheck(
+            {CheckConfigKey.UNIQUE_CHECK: {CheckConfigField.COLUMNS: ["col"]}}
+        )
+        result = check.execute(df)[0]
+
+        detail = result.detail
+        assert detail.column == "col"
+        assert detail.total_rows == 6
+        assert detail.null_count == 0
+        assert detail.duplicated_count == 5  # [2, 2, 3, 3, 3]
+        assert detail.duplicated_samples is not None
+        assert "2" in detail.duplicated_samples
+        assert "3" in detail.duplicated_samples
+        assert detail.exclude_nulls is True
+
+    def test_detail_structure_all_unique(self):
+        """Test CheckDetail structure when all values are unique."""
+        df = pl.LazyFrame({"col": [1, 2, 3]})
+        check = UniqueCheck(
+            {CheckConfigKey.UNIQUE_CHECK: {CheckConfigField.COLUMNS: ["col"]}}
+        )
+        result = check.execute(df)[0]
+
+        detail = result.detail
+        assert detail.column == "col"
+        assert detail.total_rows == 3
+        assert detail.null_count == 0
+        assert detail.duplicated_count == 0
+        assert detail.duplicated_samples is None  # No duplicates
 
 
-def test_unique_check_with_duplicate_and_null():
-    df = pl.LazyFrame({"col1": [1, 2, 2, 3, None, None]})
-    columns_to_check_unique: list[str] = ["col1"]
-    check = UniqueCheck({"unique_check": {"columns": columns_to_check_unique}})
-    result = check.execute(df)
+class TestUniqueCheckNullHandling:
+    """Focused tests on NULL handling behavior."""
 
-    assert len(result) == len(columns_to_check_unique)
-    assert not all(r.is_passed for r in result)
-    assert result[0].check_rule == CheckRule.UNIQUE_CHECK
-    assert result[0].check_name == "unique_col1"
-    assert not result[0].is_passed
-    assert result[0].detail.null_count == 2
-    assert result[0].detail.total_rows == 4
-    assert result[0].detail.duplicated_count == 2
-    assert result[0].detail.duplicated_samples == ["2"]
+    @pytest.mark.parametrize(
+        "data,exclude_nulls,expected_total_rows,expected_null_count",
+        [
+            ([1, 2, None], True, 2, 1),  # Filter out NULL
+            ([1, 2, None], False, 3, 0),  # Keep NULL (not in filtered)
+            ([None, None], True, 0, 2),  # All NULL filtered out
+            ([1, None, 2, None], True, 2, 2),  # Multiple NULLs filtered
+        ],
+    )
+    def test_null_filtering_behavior(
+        self, data, exclude_nulls, expected_total_rows, expected_null_count
+    ):
+        """Test that null filtering works correctly."""
+        df = pl.LazyFrame({"col": data})
+        check = UniqueCheck(
+            {
+                CheckConfigKey.UNIQUE_CHECK: {
+                    CheckConfigField.COLUMNS: ["col"],
+                    CheckConfigField.EXCLUDE_NULLS: exclude_nulls,
+                }
+            }
+        )
+        result = check.execute(df)[0]
+
+        assert result.detail.total_rows == expected_total_rows
+        assert result.detail.null_count == expected_null_count
+
+    def test_nulls_with_duplicates_exclude_true(self):
+        """Test duplicates exist even after excluding NULLs."""
+        df = pl.LazyFrame({"col": [1, 2, 2, None, None]})
+        check = UniqueCheck(
+            {
+                CheckConfigKey.UNIQUE_CHECK: {
+                    CheckConfigField.COLUMNS: ["col"],
+                    CheckConfigField.EXCLUDE_NULLS: True,
+                }
+            }
+        )
+        result = check.execute(df)[0]
+
+        assert not result.is_passed
+        assert result.detail.null_count == 2
+        assert result.detail.total_rows == 3  # [1, 2, 2]
+        assert result.detail.duplicated_count == 2  # [2, 2]
+
+    def test_nulls_with_duplicates_exclude_false(self):
+        """Test NULLs counted as duplicates when exclude_nulls=False."""
+        df = pl.LazyFrame({"col": [1, 2, None, None]})
+        check = UniqueCheck(
+            {
+                CheckConfigKey.UNIQUE_CHECK: {
+                    CheckConfigField.COLUMNS: ["col"],
+                    CheckConfigField.EXCLUDE_NULLS: False,
+                }
+            }
+        )
+        result = check.execute(df)[0]
+
+        assert not result.is_passed
+        assert result.detail.null_count == 0  # Not filtered
+        assert result.detail.total_rows == 4
+        assert result.detail.duplicated_count == 2  # Two NULLs
 
 
-def test_unique_check_missing_config():
-    df = pl.LazyFrame({"col1": [1, 2, None, None]})
-    check = UniqueCheck({})
-    result = check.execute(df)
+class TestUniqueCheckEdgeCases:
+    """Edge case tests for UniqueCheck."""
 
-    assert not result
+    def test_empty_dataframe(self):
+        """Test with empty DataFrame."""
+        df = pl.LazyFrame({"col": []})
+        check = UniqueCheck(
+            {CheckConfigKey.UNIQUE_CHECK: {CheckConfigField.COLUMNS: ["col"]}}
+        )
+        result = check.execute(df)
 
+        assert len(result) == 1
+        assert result[0].is_passed is True
+        assert result[0].detail.total_rows == 0
+        assert result[0].detail.duplicated_count == 0
 
-def test_unique_check_invalid_column():
-    df = pl.LazyFrame({"col1": [1, 2, 3], "col4": [4, 5, 6]})
-    columns_to_check_unique: list[str] = ["col2", "col3", "col4"]
-    check = UniqueCheck({"unique_check": {"columns": columns_to_check_unique}})
-    result = check.execute(df)
+    def test_single_value(self):
+        """Test with single value (should be unique)."""
+        df = pl.LazyFrame({"col": [1]})
+        check = UniqueCheck(
+            {CheckConfigKey.UNIQUE_CHECK: {CheckConfigField.COLUMNS: ["col"]}}
+        )
+        result = check.execute(df)[0]
 
-    assert not result
+        assert result.is_passed is True
+        assert result.detail.total_rows == 1
+        assert result.detail.duplicated_count == 0
+
+    @pytest.mark.parametrize(
+        "dtype,values",
+        [
+            (pl.Int64, [1, 2, 1]),
+            (pl.Float64, [1.0, 2.0, 1.0]),
+            (pl.Utf8, ["a", "b", "a"]),
+            (pl.Boolean, [True, False, True]),
+        ],
+    )
+    def test_duplicates_in_different_types(self, dtype, values):
+        """Test duplicate detection works across different data types."""
+        df = pl.LazyFrame({"col": values}).cast({"col": dtype})
+        check = UniqueCheck(
+            {CheckConfigKey.UNIQUE_CHECK: {CheckConfigField.COLUMNS: ["col"]}}
+        )
+        result = check.execute(df)[0]
+
+        assert not result.is_passed
+        assert result.detail.duplicated_count == 2
+
+    def test_mixed_types_with_nulls(self):
+        """Test with mixed numeric values and NULLs."""
+        df = pl.LazyFrame({"col": [1.0, 2.0, None, 2.0, None]})
+        check = UniqueCheck(
+            {
+                CheckConfigKey.UNIQUE_CHECK: {
+                    CheckConfigField.COLUMNS: ["col"],
+                    CheckConfigField.EXCLUDE_NULLS: True,
+                }
+            }
+        )
+        result = check.execute(df)[0]
+
+        assert not result.is_passed  # [1.0, 2.0, 2.0] has duplicate
+        assert result.detail.null_count == 2
+        assert result.detail.duplicated_count == 2  # [2.0, 2.0]

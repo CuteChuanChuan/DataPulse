@@ -33,6 +33,7 @@ class CheckDetail(BaseModel):
     duplicated_count: int | None = None
     duplicated_samples: list[str] | None = None
     exclude_nulls: bool | None = None
+    non_null_count: int | None = None
 
 
 class CheckResult(BaseModel):
