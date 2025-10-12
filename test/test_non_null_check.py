@@ -1,99 +1,178 @@
-import polars as pl
+"""Tests for NonNullCheck with pytest best practices."""
 
+import polars as pl
+import pytest
+
+from src.checks.constants import CheckConfigField, CheckConfigKey
 from src.checks.non_null import NonNullCheck
 from src.models.result import CheckRule
 
 
-def test_non_null_check_passed():
-    df = pl.LazyFrame({"col1": [1, 2, 3]})
-    columns_to_check_non_null: list[str] = ["col1"]
-    check = NonNullCheck({"non_null_check": {"columns": columns_to_check_non_null}})
-    result = check.execute(df)
+class TestNonNullCheck:
+    """Test suite for NonNullCheck."""
 
-    assert len(result) == len(columns_to_check_non_null)
-    assert all(r.is_passed for r in result)
-    assert result[0].check_rule == CheckRule.NOT_NULL_CHECK
-    assert result[0].check_name == "non_null_col1"
-    assert result[0].is_passed
+    @pytest.fixture
+    def sample_df(self):
+        """Sample DataFrame for testing."""
+        return pl.LazyFrame(
+            {
+                "id": [1, 2, 3],
+                "name": ["Alice", "Bob", "Charlie"],
+                "email": ["a@test.com", None, "c@test.com"],
+                "age": [None, None, None],
+            }
+        )
+
+    def _assert_basic_check_result(self, result, expected_name: str):
+        """Helper to assert basic check result properties."""
+        assert result.check_rule == CheckRule.NOT_NULL_CHECK
+        assert result.check_name == expected_name
+        assert result.detail.column in expected_name
+
+    @pytest.mark.parametrize(
+        "column,expected_pass",
+        [
+            ("id", True),  # All non-null
+            ("name", True),  # All non-null
+            ("email", False),  # Has one null
+            ("age", False),  # All nulls
+        ],
+    )
+    def test_non_null_various_columns(self, sample_df, column, expected_pass):
+        """Test non-null check on various columns."""
+        check = NonNullCheck(
+            {CheckConfigKey.NOT_NULL_CHECK: {CheckConfigField.COLUMNS: [column]}}
+        )
+        result = check.execute(sample_df)
+
+        assert len(result) == 1
+        assert result[0].is_passed == expected_pass
+        self._assert_basic_check_result(result[0], f"non_null_{column}")
+
+    def test_non_null_multiple_columns(self, sample_df):
+        """Test checking multiple columns at once."""
+        check = NonNullCheck(
+            {CheckConfigKey.NOT_NULL_CHECK: {CheckConfigField.COLUMNS: ["id", "email"]}}
+        )
+        results = check.execute(sample_df)
+
+        assert len(results) == 2
+        assert results[0].is_passed is True  # id: all non-null
+        assert results[1].is_passed is False  # email: has null
+
+    @pytest.mark.parametrize(
+        "data,expected_null_count,expected_non_null_count",
+        [
+            ([1, 2, 3], 0, 3),  # All non-null
+            ([1, None, 3], 1, 2),  # One null
+            ([None, None, None], 3, 0),  # All nulls
+            ([], 0, 0),  # Empty
+        ],
+    )
+    def test_detail_counts(self, data, expected_null_count, expected_non_null_count):
+        """Test that detail contains correct null/non-null counts."""
+        df = pl.LazyFrame({"col": data})
+        check = NonNullCheck(
+            {CheckConfigKey.NOT_NULL_CHECK: {CheckConfigField.COLUMNS: ["col"]}}
+        )
+        result = check.execute(df)[0]
+
+        assert result.detail.null_count == expected_null_count
+        assert result.detail.non_null_count == expected_non_null_count
+        assert result.detail.total_rows == len(data)
+
+    def test_empty_dataframe(self):
+        """Test with empty DataFrame (should pass)."""
+        df = pl.LazyFrame({"col": []})
+        check = NonNullCheck(
+            {CheckConfigKey.NOT_NULL_CHECK: {CheckConfigField.COLUMNS: ["col"]}}
+        )
+        result = check.execute(df)
+
+        assert len(result) == 1
+        assert result[0].is_passed is True
+        assert result[0].detail.total_rows == 0
+
+    @pytest.mark.parametrize(
+        "config,expected_result_count",
+        [
+            ({}, 0),  # Empty config
+            ({CheckConfigKey.NOT_NULL_CHECK: {}}, 0),  # Missing columns
+            (
+                {CheckConfigKey.NOT_NULL_CHECK: {CheckConfigField.COLUMNS: []}},
+                0,
+            ),  # Empty columns list
+        ],
+    )
+    def test_invalid_configs(self, sample_df, config, expected_result_count):
+        """Test handling of invalid configurations."""
+        check = NonNullCheck(config)
+        result = check.execute(sample_df)
+
+        assert len(result) == expected_result_count
+
+    def test_nonexistent_column(self, sample_df):
+        """Test checking a column that doesn't exist."""
+        check = NonNullCheck(
+            {CheckConfigKey.NOT_NULL_CHECK: {CheckConfigField.COLUMNS: ["nonexistent"]}}
+        )
+        result = check.execute(sample_df)
+
+        assert result == []
+
+    def test_mixed_valid_invalid_columns(self, sample_df):
+        """Test with mix of valid and invalid column names."""
+        check = NonNullCheck(
+            {
+                CheckConfigKey.NOT_NULL_CHECK: {
+                    CheckConfigField.COLUMNS: ["id", "nonexistent", "name"]
+                }
+            }
+        )
+        result = check.execute(sample_df)
+
+        # Should return empty due to ColumnNotFoundError
+        assert result == []
+
+    def test_detail_structure(self, sample_df):
+        """Test that CheckDetail has all required fields."""
+        check = NonNullCheck(
+            {CheckConfigKey.NOT_NULL_CHECK: {CheckConfigField.COLUMNS: ["email"]}}
+        )
+        result = check.execute(sample_df)[0]
+
+        detail = result.detail
+        assert detail.column == "email"
+        assert detail.total_rows == 3
+        assert detail.null_count == 1
+        assert detail.non_null_count == 2
+
+        # Check that other fields are None (not used in non-null check)
+        assert detail.duplicated_count is None
+        assert detail.duplicated_samples is None
+        assert detail.exclude_nulls is None
 
 
-def test_non_null_check_failed():
-    df = pl.LazyFrame({"col1": [1, 2, None]})
-    columns_to_check_non_null: list[str] = ["col1"]
-    check = NonNullCheck({"non_null_check": {"columns": columns_to_check_non_null}})
-    result = check.execute(df)
+class TestNonNullCheckEdgeCases:
+    """Edge case tests for NonNullCheck."""
 
-    assert len(result) == len(columns_to_check_non_null)
-    assert not all(r.is_passed for r in result)
-    assert result[0].check_rule == CheckRule.NOT_NULL_CHECK
-    assert result[0].check_name == "non_null_col1"
-    assert not result[0].is_passed
+    @pytest.mark.parametrize(
+        "dtype,null_value",
+        [
+            (pl.Int64, None),
+            (pl.Float64, None),
+            (pl.Utf8, None),
+            (pl.Boolean, None),
+        ],
+    )
+    def test_nulls_in_different_types(self, dtype, null_value):
+        """Test null detection works across different data types."""
+        df = pl.LazyFrame({"col": [null_value, null_value]}).cast({"col": dtype})
+        check = NonNullCheck(
+            {CheckConfigKey.NOT_NULL_CHECK: {CheckConfigField.COLUMNS: ["col"]}}
+        )
+        result = check.execute(df)
 
-
-def test_non_null_check_mix_result():
-    df = pl.LazyFrame({"col1": [1, 2, None], "col2": [4, 5, 6]})
-    columns_to_check_non_null: list[str] = ["col1", "col2"]
-    check = NonNullCheck({"non_null_check": {"columns": columns_to_check_non_null}})
-    result = check.execute(df)
-
-    assert len(result) == len(columns_to_check_non_null)
-    assert not all(r.is_passed for r in result)
-    assert result[0].check_rule == CheckRule.NOT_NULL_CHECK
-    assert result[0].check_name == "non_null_col1"
-    assert not result[0].is_passed
-    assert result[1].check_rule == CheckRule.NOT_NULL_CHECK
-    assert result[1].check_name == "non_null_col2"
-    assert result[1].is_passed
-
-
-def test_non_null_check_empty_df():
-    df = pl.LazyFrame({"col1": []})
-    columns_to_check_non_null: list[str] = ["col1"]
-    check = NonNullCheck({"non_null_check": {"columns": columns_to_check_non_null}})
-    result = check.execute(df)
-
-    assert len(result) == len(columns_to_check_non_null)
-    assert all(r.is_passed for r in result)
-    assert result[0].check_rule == CheckRule.NOT_NULL_CHECK
-    assert result[0].check_name == "non_null_col1"
-    assert result[0].is_passed
-
-
-def test_non_null_check_all_nulls():
-    df = pl.LazyFrame({"col1": [None, None, None]})
-    check = NonNullCheck({"non_null_check": {"columns": ["col1"]}})
-    result = check.execute(df)
-
-    assert len(result) == 1
-    assert not result[0].is_passed
-    assert result[0].detail.null_count == 3
-    assert result[0].detail.non_null_count == 0
-    assert result[0].detail.total_rows == 3
-
-
-def test_non_null_check_missing_config():
-    df = pl.LazyFrame({"col1": [1, 2, 3]})
-    check = NonNullCheck({})
-    result = check.execute(df)
-
-    assert result == []
-
-
-def test_non_null_check_invalid_column():
-    df = pl.LazyFrame({"col1": [1, 2, 3]})
-    check = NonNullCheck({"non_null_check": {"columns": ["col_not_exist"]}})
-    result = check.execute(df)
-
-    assert result == []
-
-
-def test_non_null_check_detail():
-    df = pl.LazyFrame({"col1": [1, None, 3, None, 5]})
-    check = NonNullCheck({"non_null_check": {"columns": ["col1"]}})
-    result = check.execute(df)
-
-    assert result[0].detail.column == "col1"
-    assert result[0].detail.total_rows == 5
-    assert result[0].detail.null_count == 2
-    assert result[0].detail.non_null_count == 3
-    assert not result[0].is_passed
+        assert len(result) == 1
+        assert not result[0].is_passed
+        assert result[0].detail.null_count == 2
