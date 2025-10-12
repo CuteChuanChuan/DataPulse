@@ -1,8 +1,7 @@
 import polars as pl
-from loguru import logger
-from polars.exceptions import ColumnNotFoundError
 
 from src.checks.base import QualityCheck
+from src.checks.constants import CheckConfigField, CheckConfigKey
 from src.models import CheckDetail, CheckResult, CheckRule
 
 
@@ -48,35 +47,19 @@ class UniqueCheck(QualityCheck):
 
         Returns:
             List of CheckResult objects, one per column checked
-
-        Raises:
-            ColumnNotFoundError: If specified columns don't exist in the DataFrame
         """
-        unique_check_config = self.config.get("unique_check", {})
-        columns_to_check: list[str] = unique_check_config.get("columns", [])
-        exclude_nulls: bool = unique_check_config.get("exclude_nulls", True)
+        check_config = self.config.get(CheckConfigKey.UNIQUE_CHECK, {})
+        columns_to_check: list[str] = check_config.get(CheckConfigField.COLUMNS, [])
+        exclude_nulls: bool = check_config.get(CheckConfigField.EXCLUDE_NULLS, True)
 
-        if not columns_to_check:
-            logger.warning("No columns provided to examine uniqueness")
+        df_collected = self._validate_and_collect_columns(df, columns_to_check)
+        if df_collected is None:
             return []
 
-        try:
-            df_filtered_columns: pl.DataFrame = df.select(columns_to_check).collect()
-        except ColumnNotFoundError:
-            columns_non_exist = [
-                col
-                for col in columns_to_check
-                if col not in df.collect_schema().names()
-            ]
-            logger.error(f"Columns {columns_non_exist} not found")
-            return []
-
-        check_result: list[CheckResult] = [
-            self._check_column_uniqueness(df_filtered_columns, col, exclude_nulls)
+        return [
+            self._check_column_uniqueness(df_collected, col, exclude_nulls)
             for col in columns_to_check
         ]
-
-        return check_result
 
     def _check_column_uniqueness(
         self, df: pl.DataFrame, col: str, exclude_nulls: bool
