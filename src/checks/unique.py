@@ -23,6 +23,7 @@ class UniqueCheck(QualityCheck):
 
         Fields:
             columns (list[str]): Required. List of columns to check for uniqueness
+
             exclude_nulls (bool): Optional. Exclude NULL values (default: True)
 
     Examples:
