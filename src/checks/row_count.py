@@ -1,4 +1,5 @@
 import polars as pl
+from loguru import logger
 
 from src.checks.base import QualityCheck
 from src.checks.constants import CheckConfigField, CheckConfigKey
@@ -62,14 +63,68 @@ class RowCountCheck(QualityCheck):
             df: Polars LazyFrame to check
 
         Returns:
-            List containing a single CheckResult with row count validation
+            List containing a single CheckResult with row count validation,
+            or list with single error CheckResult if configuration is invalid
         """
         config = self.config.get(CheckConfigKey.ROW_COUNT_CHECK, {})
         min_rows_expected = config.get(CheckConfigField.MIN_ROWS_EXPECTED, 0)
+        max_rows_expected = config.get(CheckConfigField.MAX_ROWS_EXPECTED, None)
+
+        # Validate min_rows_expected
+        if min_rows_expected < 0:
+            error_msg = f"Invalid min_rows_expected ({min_rows_expected}): must be >= 0"
+            logger.error(error_msg)
+            return [
+                CheckResult(
+                    check_rule=self.get_rule_type(),
+                    check_name="row_count_config_error",
+                    is_passed=False,
+                    detail=CheckDetail(
+                        min_rows_expected=min_rows_expected,
+                        error_message=error_msg,
+                    ),
+                )
+            ]
+
+        # Validate max_rows_expected
+        if max_rows_expected is not None and max_rows_expected < 0:
+            error_msg = f"Invalid max_rows_expected ({max_rows_expected}): must be >= 0"
+            logger.error(error_msg)
+            return [
+                CheckResult(
+                    check_rule=self.get_rule_type(),
+                    check_name="row_count_config_error",
+                    is_passed=False,
+                    detail=CheckDetail(
+                        max_rows_expected=max_rows_expected,
+                        error_message=error_msg,
+                    ),
+                )
+            ]
+
+        # Validate min <= max
+        if max_rows_expected is not None and min_rows_expected > max_rows_expected:
+            error_msg = (
+                f"Invalid range: min_rows_expected ({min_rows_expected}) > "
+                f"max_rows_expected ({max_rows_expected})"
+            )
+            logger.error(error_msg)
+            return [
+                CheckResult(
+                    check_rule=self.get_rule_type(),
+                    check_name="row_count_config_error",
+                    is_passed=False,
+                    detail=CheckDetail(
+                        min_rows_expected=min_rows_expected,
+                        max_rows_expected=max_rows_expected,
+                        error_message=error_msg,
+                    ),
+                )
+            ]
 
         total_rows = df.collect().height
         is_passed = min_rows_expected <= total_rows
-        if max_rows_expected := config.get(CheckConfigField.MAX_ROWS_EXPECTED, None):
+        if max_rows_expected is not None:
             is_passed = is_passed and total_rows <= max_rows_expected
 
         return [

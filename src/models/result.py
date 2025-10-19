@@ -39,6 +39,7 @@ class CheckDetail(BaseModel):
     latest_timestamp: str | None = None
     age_hours: float | None = None
     max_age_hours: float | None = None
+    error_message: str | None = None
 
 
 class CheckResult(BaseModel):

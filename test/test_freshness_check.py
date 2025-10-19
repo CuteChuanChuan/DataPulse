@@ -149,13 +149,16 @@ class TestFreshnessCheckEdgeCases:
         assert result[0].detail.age_hours is None
 
     @pytest.mark.parametrize(
-        "config,expected_result_count",
+        "config,expected_error_substring",
         [
-            ({}, 0),  # Empty config
-            ({CheckConfigKey.FRESHNESS_CHECK: {}}, 0),  # Missing column
+            ({}, "No configuration provided"),  # Empty config
+            (
+                {CheckConfigKey.FRESHNESS_CHECK: {}}, 
+                "No column specified"
+            ),  # Missing column
             (
                 {CheckConfigKey.FRESHNESS_CHECK: {CheckConfigField.COLUMN: ""}},
-                0,
+                "No column specified",
             ),  # Empty column name
             (
                 {
@@ -163,7 +166,7 @@ class TestFreshnessCheckEdgeCases:
                         CheckConfigField.COLUMN: "updated_at"
                     }
                 },
-                0,
+                "No max_age_hours specified",
             ),  # Missing max_age_hours
             (
                 {
@@ -172,7 +175,7 @@ class TestFreshnessCheckEdgeCases:
                         CheckConfigField.MAX_AGE_HOURS: -1,
                     }
                 },
-                0,
+                "must be >= 0",
             ),  # Negative max_age_hours
             (
                 {
@@ -181,16 +184,23 @@ class TestFreshnessCheckEdgeCases:
                         CheckConfigField.MAX_AGE_HOURS: -100,
                     }
                 },
-                0,
+                "must be >= 0",
             ),  # Large negative max_age_hours
         ],
     )
-    def test_invalid_configs(self, sample_df, config, expected_result_count):
-        """Test handling of invalid configurations."""
+    def test_invalid_configs(self, sample_df, config, expected_error_substring):
+        """Test handling of invalid configurations.
+
+        Invalid configs now return a failed CheckResult with error_message
+        instead of an empty list.
+        """
         check = FreshnessCheck(config)
         result = check.execute(sample_df)
 
-        assert len(result) == expected_result_count
+        assert len(result) == 1
+        assert result[0].is_passed is False
+        assert result[0].detail.error_message is not None
+        assert expected_error_substring in result[0].detail.error_message
 
     def test_mixed_null_and_valid_timestamps(self):
         """Test with a mix of NULL and valid timestamps (should ignore NULLs)."""
