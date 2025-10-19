@@ -5,7 +5,7 @@ import pytest
 
 from src.checks.constants import CheckConfigField, CheckConfigKey
 from src.checks.non_null import NonNullCheck
-from src.models.result import CheckRule
+from src.models.result import CheckResult, CheckRule
 
 
 class TestNonNullCheck:
@@ -23,7 +23,8 @@ class TestNonNullCheck:
             }
         )
 
-    def _assert_basic_check_result(self, result, expected_name: str):
+    @staticmethod
+    def _assert_basic_check_result(result: CheckResult, expected_name: str):
         """Helper to assert basic check result properties."""
         assert result.check_rule == CheckRule.NOT_NULL_CHECK
         assert result.check_name == expected_name

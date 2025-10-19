@@ -5,14 +5,14 @@ import pytest
 
 from src.checks.constants import CheckConfigField, CheckConfigKey
 from src.checks.row_count import RowCountCheck
-from src.models.result import CheckRule
+from src.models.result import CheckResult, CheckRule
 
 
 class TestRowCountCheck:
     """Test suite for RowCountCheck."""
 
     @staticmethod
-    def _assert_basic_check_result(result):
+    def _assert_basic_check_result(result: CheckResult):
         """Helper to assert basic check result properties."""
         assert result.check_rule == CheckRule.ROWS_COUNT_CHECK
         assert result.check_name == "row_count"

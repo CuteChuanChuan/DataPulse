@@ -16,9 +16,9 @@ class CheckConfigKey(str, Enum):
 class CheckConfigField(str, Enum):
     """Common configuration field names."""
 
+    COLUMN = "column"
     COLUMNS = "columns"
     EXCLUDE_NULLS = "exclude_nulls"
     MIN_ROWS_EXPECTED = "min"
     MAX_ROWS_EXPECTED = "max"
-    COLUMN = "column"
     MAX_AGE_HOURS = "max_age_hours"

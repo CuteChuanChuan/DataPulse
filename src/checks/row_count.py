@@ -13,7 +13,8 @@ class RowCountCheck(QualityCheck):
     check that counts all rows regardless of NULL values in any columns.
 
     Configuration:
-        The config dict must contain a 'row_count_check' key with the following structure::
+        The config dict must contain a 'row_count_check' key with the
+        following structure::
 
             {
                 "row_count_check": {

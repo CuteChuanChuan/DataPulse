@@ -2,6 +2,7 @@
 
 from .base import QualityCheck
 from .constants import CheckConfigField, CheckConfigKey
+from .freshness import FreshnessCheck
 from .non_null import NonNullCheck
 from .row_count import RowCountCheck
 from .unique import UniqueCheck
@@ -11,6 +12,7 @@ __all__ = [
     "UniqueCheck",
     "NonNullCheck",
     "RowCountCheck",
+    "FreshnessCheck",
     "CheckConfigKey",
     "CheckConfigField",
 ]

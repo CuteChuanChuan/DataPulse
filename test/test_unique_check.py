@@ -5,7 +5,7 @@ import pytest
 
 from src.checks.constants import CheckConfigField, CheckConfigKey
 from src.checks.unique import UniqueCheck
-from src.models.result import CheckRule
+from src.models.result import CheckResult, CheckRule
 
 
 class TestUniqueCheck:
@@ -25,7 +25,7 @@ class TestUniqueCheck:
         )
 
     @staticmethod
-    def _assert_basic_check_result(result, expected_name: str):
+    def _assert_basic_check_result(result: CheckResult, expected_name: str):
         """Helper to assert basic check result properties."""
         assert result.check_rule == CheckRule.UNIQUE_CHECK
         assert result.check_name == expected_name
