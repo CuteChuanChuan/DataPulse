@@ -5,14 +5,14 @@ import pytest
 
 from src.checks.constants import CheckConfigField, CheckConfigKey
 from src.checks.row_count import RowCountCheck
-from src.models.result import CheckRule
+from src.models.result import CheckResult, CheckRule
 
 
 class TestRowCountCheck:
     """Test suite for RowCountCheck."""
 
     @staticmethod
-    def _assert_basic_check_result(result):
+    def _assert_basic_check_result(result: CheckResult):
         """Helper to assert basic check result properties."""
         assert result.check_rule == CheckRule.ROWS_COUNT_CHECK
         assert result.check_name == "row_count"
@@ -111,6 +111,50 @@ class TestRowCountCheck:
         assert len(result) == 1
         assert result[0].is_passed is True
         assert result[0].detail.total_rows == 50
+
+    @pytest.mark.parametrize(
+        "config,expected_error_substring",
+        [
+            (
+                {
+                    CheckConfigKey.ROW_COUNT_CHECK: {
+                        CheckConfigField.MIN_ROWS_EXPECTED: -1
+                    }
+                },
+                "min_rows_expected",
+            ),  # Negative min
+            (
+                {
+                    CheckConfigKey.ROW_COUNT_CHECK: {
+                        CheckConfigField.MAX_ROWS_EXPECTED: -1
+                    }
+                },
+                "max_rows_expected",
+            ),  # Negative max
+            (
+                {
+                    CheckConfigKey.ROW_COUNT_CHECK: {
+                        CheckConfigField.MIN_ROWS_EXPECTED: 100,
+                        CheckConfigField.MAX_ROWS_EXPECTED: 50,
+                    }
+                },
+                "min_rows_expected",
+            ),  # min > max
+        ],
+    )
+    def test_invalid_configs(self, config, expected_error_substring):
+        """Test handling of invalid configurations.
+
+        Invalid configs now return a failed CheckResult with error_message.
+        """
+        df = pl.LazyFrame({"col": range(75)})
+        check = RowCountCheck(config)
+        result = check.execute(df)
+
+        assert len(result) == 1
+        assert result[0].is_passed is False
+        assert result[0].detail.error_message is not None
+        assert expected_error_substring in result[0].detail.error_message
 
     def test_row_count_includes_rows_with_nulls(self):
         """Test that rows with NULL values are counted.

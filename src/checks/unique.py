@@ -1,4 +1,5 @@
 import polars as pl
+from loguru import logger
 
 from src.checks.base import QualityCheck
 from src.checks.constants import CheckConfigField, CheckConfigKey
@@ -47,15 +48,38 @@ class UniqueCheck(QualityCheck):
             df: Polars LazyFrame to check
 
         Returns:
-            List of CheckResult objects, one per column checked
+            List of CheckResult objects, one per column checked,
+            or list with single error CheckResult if configuration is invalid
         """
         check_config = self.config.get(CheckConfigKey.UNIQUE_CHECK, {})
         columns_to_check: list[str] = check_config.get(CheckConfigField.COLUMNS, [])
         exclude_nulls: bool = check_config.get(CheckConfigField.EXCLUDE_NULLS, True)
 
+        # Validate columns provided
+        if not columns_to_check:
+            error_msg = f"No columns provided for {self.get_rule_type().value} check"
+            logger.warning(error_msg)
+            return [
+                CheckResult(
+                    check_rule=self.get_rule_type(),
+                    check_name="unique_config_error",
+                    is_passed=False,
+                    detail=CheckDetail(error_message=error_msg),
+                )
+            ]
+
         df_collected = self._validate_and_collect_columns(df, columns_to_check)
         if df_collected is None:
-            return []
+            # Column validation failed (detailed error already logged by base class)
+            error_msg = "One or more columns not found in DataFrame"
+            return [
+                CheckResult(
+                    check_rule=self.get_rule_type(),
+                    check_name="unique_config_error",
+                    is_passed=False,
+                    detail=CheckDetail(error_message=error_msg),
+                )
+            ]
 
         return [
             self._check_column_uniqueness(df_collected, col, exclude_nulls)

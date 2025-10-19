@@ -5,7 +5,7 @@ import pytest
 
 from src.checks.constants import CheckConfigField, CheckConfigKey
 from src.checks.unique import UniqueCheck
-from src.models.result import CheckRule
+from src.models.result import CheckResult, CheckRule
 
 
 class TestUniqueCheck:
@@ -25,7 +25,7 @@ class TestUniqueCheck:
         )
 
     @staticmethod
-    def _assert_basic_check_result(result, expected_name: str):
+    def _assert_basic_check_result(result: CheckResult, expected_name: str):
         """Helper to assert basic check result properties."""
         assert result.check_rule == CheckRule.UNIQUE_CHECK
         assert result.check_name == expected_name
@@ -122,31 +122,47 @@ class TestUniqueCheck:
         assert result.detail.null_count == 2
 
     @pytest.mark.parametrize(
-        "config,expected_result_count",
+        "config,expected_error_substring",
         [
-            ({}, 0),  # Empty config
-            ({CheckConfigKey.UNIQUE_CHECK: {}}, 0),  # Missing columns
+            ({}, "No columns provided"),  # Empty config
+            (
+                {CheckConfigKey.UNIQUE_CHECK: {}}, 
+                "No columns provided"
+            ),  # Missing columns
             (
                 {CheckConfigKey.UNIQUE_CHECK: {CheckConfigField.COLUMNS: []}},
-                0,
+                "No columns provided",
             ),  # Empty columns list
         ],
     )
-    def test_invalid_configs(self, sample_df, config, expected_result_count):
-        """Test handling of invalid configurations."""
+    def test_invalid_configs(self, sample_df, config, expected_error_substring):
+        """Test handling of invalid configurations.
+
+        Invalid configs now return a failed CheckResult with error_message
+        instead of an empty list.
+        """
         check = UniqueCheck(config)
         result = check.execute(sample_df)
 
-        assert len(result) == expected_result_count
+        assert len(result) == 1
+        assert result[0].is_passed is False
+        assert result[0].detail.error_message is not None
+        assert expected_error_substring in result[0].detail.error_message
 
     def test_nonexistent_column(self, sample_df):
-        """Test checking a column that doesn't exist."""
+        """Test checking a column that doesn't exist.
+
+        Now returns a failed CheckResult with error message instead of empty list.
+        """
         check = UniqueCheck(
             {CheckConfigKey.UNIQUE_CHECK: {CheckConfigField.COLUMNS: ["nonexistent"]}}
         )
         result = check.execute(sample_df)
 
-        assert result == []
+        assert len(result) == 1
+        assert result[0].is_passed is False
+        assert result[0].detail.error_message is not None
+        assert "not found" in result[0].detail.error_message
 
     def test_detail_structure_with_duplicates(self):
         """Test CheckDetail structure when duplicates exist."""

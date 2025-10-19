@@ -36,6 +36,10 @@ class CheckDetail(BaseModel):
     non_null_count: int | None = None
     min_rows_expected: int | None = None
     max_rows_expected: int | None = None
+    latest_timestamp: str | None = None
+    age_hours: float | None = None
+    max_age_hours: float | None = None
+    error_message: str | None = None
 
 
 class CheckResult(BaseModel):
